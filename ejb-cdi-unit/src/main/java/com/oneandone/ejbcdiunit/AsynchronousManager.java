@@ -34,22 +34,19 @@ public class AsynchronousManager {
     private static final int TIME_TO_WAIT_AFTER_HANDLING = 200;
     private static final int TIME_TO_WAIT_FOR_INTERRUPT = 200;
     private static final int TIME_TO_STOP_LOOPING_ONCE = 200;
-    private Logger logger = LoggerFactory.getLogger("AsynchronousManager");
-
     @Inject
     SimulatedTransactionManager transactionManager;
-
     @Inject
     EjbExtensionExtended ejbExtensionExtended;
-
     @Inject
     BeanManager bm;
-
+    private Logger logger = LoggerFactory.getLogger("AsynchronousManager");
     private CreationalContexts creationalContexts = null;
 
     private ArrayList<AsynchronousRunnable> runnables = new ArrayList<>();
 
     private boolean enqueAsynchronousCalls = false;
+    private Thread asyncHandler = null;
 
     /**
      * check if Asynchronous Methods may be dispatched
@@ -69,16 +66,6 @@ public class AsynchronousManager {
     public void setEnqueAsynchronousCalls(boolean enqueAsynchronousCalls1) {
         this.enqueAsynchronousCalls = enqueAsynchronousCalls1;
     }
-
-    /**
-     * Used to communicate end of Thread to the while(true)
-     */
-    private static class InterruptThreadException extends RuntimeException {
-
-        private static final long serialVersionUID = -1786916994010029037L;
-    }
-
-
 
     /**
      * find timer-called methods in classes prepared by EjbExtension and add these to this Asynchronous Manager.
@@ -141,8 +128,6 @@ public class AsynchronousManager {
         }
     }
 
-    private Thread asyncHandler = null;
-
     private void initThread() {
         asyncHandler = new Thread(new Runnable() {
             @Override
@@ -151,10 +136,14 @@ public class AsynchronousManager {
                     long time = System.currentTimeMillis();
                     try {
                         int done = once();
-                        logger.trace("AsynchronousManager handled {} runners", done);
+                        if (done > 0) {
+                            logger.info("AsynchronousManager handled {} runners", done);
+                        }
                         while (thereAreOnces() && System.currentTimeMillis() - time < TIME_TO_STOP_LOOPING_ONCE) {
                             done = once();
-                            logger.trace("AsynchronousManager handled {} runners", done);
+                            if (done > 0) {
+                                logger.info("AsynchronousManager handled {} runners", done);
+                            }
                         }
                     } catch (InterruptThreadException e) {
                         logger.info("Asynchronous Manager Thread received end signal");
@@ -215,58 +204,6 @@ public class AsynchronousManager {
     }
 
     /**
-     * Interface for Lambda used to define endcondition of call-loop
-     */
-    public interface AsynchronousCallEndCondition {
-        /**
-         * this is the lambda function.
-         *
-         * @return true if the end of running condition is reached
-         */
-        boolean stopCalling();
-    }
-
-    /**
-     *
-     */
-    private interface AsynchronousRunnable {
-        /**
-         * start the logic of this asynchronous call.
-         */
-        void run();
-
-        /**
-         * used to decide, whether this should get removed from original array after execution.
-         *
-         * @return true it this should not be called more than once
-         */
-        boolean oneShotOnly();
-    }
-
-    /**
-     * defines an asynchronous call done only once
-     */
-    private abstract static class AsynchronousOnetimeRunnable implements AsynchronousRunnable {
-        @Override
-        public boolean oneShotOnly() {
-            return true;
-        }
-    }
-
-    /**
-     * defines an asynchronous call done not only once, i.e. timer calls.
-     */
-    private abstract static class AsynchronousMultipleRunnable implements AsynchronousRunnable {
-        @Override
-        public boolean oneShotOnly() {
-            return false;
-        }
-    }
-
-
-
-
-    /**
      * Register a Handler only called once.
      *
      * @param runnable the code to be called. After the call, The Asynchronous Manager removes all references to this.
@@ -278,6 +215,11 @@ public class AsynchronousManager {
                 try {
                     transactionManager.push(TransactionAttributeType.NOT_SUPPORTED);
                     runnable.run();
+                } catch (InterruptThreadException e) {
+                    logger.info("Asynchronous Manager Thread received end signal");
+                    throw e;
+                } catch (Throwable thw) {
+                    logger.error("Error during OneTimeHandler", thw);
                 } finally {
                     try {
                         transactionManager.pop();
@@ -292,15 +234,21 @@ public class AsynchronousManager {
     /**
      * Register a Handler not called only once, so it should not get removed during call-loop.
      *
-     * @param runnable the code to be called. After the call, The Asynchronous Manager removes all references to this.
+     * @param runnable
+     *            the code to be called.
      */
-    private synchronized void addMultipleHandler(final Runnable runnable) {
+    public synchronized void addMultipleHandler(final Runnable runnable) {
         runnables.add(new AsynchronousMultipleRunnable() {
             @Override
             public void run() {
                 try {
                     transactionManager.push(TransactionAttributeType.NOT_SUPPORTED);
                     runnable.run();
+                } catch (InterruptThreadException e) {
+                    logger.info("Asynchronous Manager Thread received end signal");
+                    throw e;
+                } catch (Throwable thw) {
+                    logger.error("Error during MultipleHandler", thw);
                 } finally {
                     try {
                         transactionManager.pop();
@@ -311,7 +259,6 @@ public class AsynchronousManager {
             }
         });
     }
-
 
     private synchronized List<AsynchronousRunnable> cloneRunnables() {
         ArrayList<AsynchronousRunnable> result = new ArrayList<>(runnables.size());
@@ -366,7 +313,7 @@ public class AsynchronousManager {
      * @param predicate the condition, if true then end calling.
      */
     public void until(AsynchronousCallEndCondition predicate) {
-        while (!predicate.stopCalling()) {
+        do {
             List<AsynchronousRunnable> runners = cloneRunnables();
             if (runners.isEmpty()) {
                 return;
@@ -377,7 +324,7 @@ public class AsynchronousManager {
                     remove(runner);
                 }
             }
-        }
+        } while (!predicate.stopCalling());
     }
 
     /**
@@ -388,18 +335,79 @@ public class AsynchronousManager {
         until(new AsynchronousCallEndCondition() {
             @Override
             public boolean stopCalling() {
-                return false;
+                for (AsynchronousRunnable ar : runnables) {
+                    if (ar.oneShotOnly())
+                        return false;
+                }
+                return true;
             }
         });
     }
 
-    private boolean thereAreOnces() {
+    public boolean thereAreOnces() {
         for (AsynchronousRunnable r: runnables) {
             if (r instanceof AsynchronousOnetimeRunnable) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Interface for Lambda used to define endcondition of call-loop
+     */
+    public interface AsynchronousCallEndCondition {
+        /**
+         * this is the lambda function.
+         *
+         * @return true if the end of running condition is reached
+         */
+        boolean stopCalling();
+    }
+
+    /**
+     *
+     */
+    private interface AsynchronousRunnable {
+        /**
+         * start the logic of this asynchronous call.
+         */
+        void run();
+
+        /**
+         * used to decide, whether this should get removed from original array after execution.
+         *
+         * @return true it this should not be called more than once
+         */
+        boolean oneShotOnly();
+    }
+
+    /**
+     * Used to communicate end of Thread to the while(true)
+     */
+    private static class InterruptThreadException extends RuntimeException {
+
+        private static final long serialVersionUID = -1786916994010029037L;
+    }
+
+    /**
+     * defines an asynchronous call done only once
+     */
+    private abstract static class AsynchronousOnetimeRunnable implements AsynchronousRunnable {
+        @Override
+        public boolean oneShotOnly() {
+            return true;
+        }
+    }
+
+    /**
+     * defines an asynchronous call done not only once, i.e. timer calls.
+     */
+    private abstract static class AsynchronousMultipleRunnable implements AsynchronousRunnable {
+        @Override
+        public boolean oneShotOnly() {
+            return false;
+        }
     }
 
 

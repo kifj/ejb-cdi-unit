@@ -1,22 +1,17 @@
 package com.oneandone.ejbcdiunit.testbases;
 
-import static org.hamcrest.Matchers.is;
+import com.oneandone.ejbcdiunit.ejbs.*;
+import com.oneandone.ejbcdiunit.entities.TestEntity1;
+import org.slf4j.Logger;
 
 import javax.ejb.EJB;
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
 import javax.persistence.EntityManager;
-import javax.transaction.UserTransaction;
+import javax.transaction.*;
 
-import org.junit.Assert;
-import org.slf4j.Logger;
-
-import com.oneandone.ejbcdiunit.ejbs.CDIClass;
-import com.oneandone.ejbcdiunit.ejbs.OuterClass;
-import com.oneandone.ejbcdiunit.ejbs.SingletonEJB;
-import com.oneandone.ejbcdiunit.ejbs.StatelessBeanManagedTrasEJB;
-import com.oneandone.ejbcdiunit.ejbs.StatelessEJB;
-import com.oneandone.ejbcdiunit.entities.TestEntity1;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
 
 /**
  * @author aschoerk
@@ -30,11 +25,14 @@ public abstract class EJBTransactionTestBase {
     @Inject
     protected CDIClass cdiClass;
 
-    @EJB
+    @EJB(name = "StatelessEJB")
     protected StatelessEJB statelessEJB;
 
     @EJB
     protected SingletonEJB singletonEJB;
+
+    @EJB
+    protected StatelessChildEJB statelessChildEJB;
 
     @EJB
     protected StatelessBeanManagedTrasEJB statelessBeanManagedTrasEJB;
@@ -61,7 +59,7 @@ public abstract class EJBTransactionTestBase {
     public void requiresNewMethodWorks() throws Exception {
         runTestInRolledBackTransaction(e -> statelessEJB.saveInNewTransaction(e), 2, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(1));
+        assertThat(res.intValue(), is(1));
     }
 
     /**
@@ -71,7 +69,7 @@ public abstract class EJBTransactionTestBase {
     public void defaultMethodWorks() throws Exception {
         runTestInRolledBackTransaction(e -> statelessEJB.saveInCurrentTransactionDefaultTraAttribute(e), 2, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(0));
+        assertThat(res.intValue(), is(0));
     }
 
 
@@ -82,7 +80,7 @@ public abstract class EJBTransactionTestBase {
     public void requiredMethodWorks() throws Exception {
         runTestInRolledBackTransaction(e -> statelessEJB.saveInCurrentTransaction(e), 2, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(0));
+        assertThat(res.intValue(), is(0));
     }
 
     /**
@@ -92,7 +90,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveNewInRequired() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveNewInRequired(e), 2, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(1));
+        assertThat(res.intValue(), is(1));
     }
 
 
@@ -103,7 +101,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveNewInRequiredThrowException() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveNewInRequiredThrowRTException(e), 2, true);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(1));
+        assertThat(res.intValue(), is(1));
     }
 
 
@@ -114,7 +112,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveRequiredInRequired() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveRequiredInRequired(e), 2, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(0));
+        assertThat(res.intValue(), is(0));
     }
 
     /**
@@ -125,7 +123,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveRequiredInRequiredThrowException() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveRequiredInRequiredThrowException(e), 1, true);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(0));
+        assertThat(res.intValue(), is(0));
     }
 
 
@@ -136,7 +134,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveNewInNewTra() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveNewInNewTra(e), 2, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(1));
+        assertThat(res.intValue(), is(1));
     }
 
     /**
@@ -146,7 +144,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveRequiredInNewTraThrow() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveRequiredInNewTraThrow(e), 1, true);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(0));
+        assertThat(res.intValue(), is(0));
     }
 
 
@@ -158,7 +156,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveNewInNewTraThrow() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveNewInNewTraThrow(e), 2, true);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(1));
+        assertThat(res.intValue(), is(1));
     }
 
     /**
@@ -168,7 +166,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveRequiredInNewTra() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveRequiredInNewTra(e), 2, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(1));
+        assertThat(res.intValue(), is(1));
     }
 
 
@@ -179,7 +177,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveRequiredPlusNewInNewTra() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveRequiredPlusNewInNewTra(e), 3, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(2));
+        assertThat(res.intValue(), is(2));
     }
 
     /**
@@ -192,7 +190,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveRequiredPlusNewInNewTraButDirectCallAndThrow() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveRequiredPlusNewInNewTraButDirectCallAndThrow(e), 1, true);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(0));
+        assertThat(res.intValue(), is(0));
     }
 
     /**
@@ -203,7 +201,7 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveRequiresNewLocalAsBusinessObject() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveRequiresNewLocalAsBusinessObject(e), 3, false);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(2));
+        assertThat(res.intValue(), is(2));
     }
 
     /**
@@ -215,7 +213,20 @@ public abstract class EJBTransactionTestBase {
     public void indirectSaveRequiresNewLocalAsBusinessObjectAndThrow() throws Exception {
         runTestInRolledBackTransaction(e -> outerClass.saveRequiresNewLocalAsBusinessObjectAndThrow(e), 2, true);
         Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
-        Assert.assertThat(res.intValue(), is(1));
+        assertThat(res.intValue(), is(1));
+    }
+
+    /**
+     * check if indirect call via BusinessInterface returned from SessionContext works and subsequent RuntimeException therefore does not lead to
+     * rollback of inner insert.
+     *
+     * @throws Exception
+     *             don_t care
+     */
+    public void indirectSaveRequiresNewLocalUsingSelfAndThrow() throws Exception {
+        runTestInRolledBackTransaction(e -> outerClass.saveRequiresNewLocalUsingSelfAndThrow(e), 2, true);
+        Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
+        assertThat(res.intValue(), is(1));
     }
 
 
@@ -247,5 +258,69 @@ public abstract class EJBTransactionTestBase {
     public void testBeanManagedTransactionsWOTra() throws Exception {
         statelessBeanManagedTrasEJB.insertWithoutTra(new TestEntity1());
     }
+
+
+    public void testBeanManagedWOTraInTestCode() {
+        TestEntity1 e = new TestEntity1();
+        entityManager.persist(e);
+    }
+
+    public void testBeanManagedWithTraInTestCodeInSupported()
+            throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException {
+        userTransaction.begin();
+        statelessEJB.saveInSupportedTransaction(new TestEntity1());
+        userTransaction.commit();
+    }
+
+    public void tryTestBeanManagedWOTraInTestCodeInSupported()
+            throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException {
+        statelessEJB.saveInSupportedTransaction(new TestEntity1());
+    }
+
+
+    public void testBeanManagedWithTraInTestCodeTryInNotSupported()
+            throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException {
+        userTransaction.begin();
+        statelessEJB.trySaveInNotSupportedTransaction(new TestEntity1());
+        userTransaction.commit();
+    }
+
+    public void testBeanManagedWOTraInTestCodeTryInNotSupported()
+            throws SystemException, NotSupportedException, HeuristicRollbackException, HeuristicMixedException, RollbackException {
+        userTransaction.begin();
+        statelessEJB.trySaveInNotSupportedTransaction(new TestEntity1());
+        userTransaction.commit();
+    }
+
+    public void saveToSetRollbackOnlyAndTryAdditionalSave() throws Exception {
+        runTestInRolledBackTransaction(e -> outerClass.saveToSetRollbackOnlyAndTryAdditionalSave(e), 1, true);
+        Number res = entityManager.createQuery("select count(e) from TestEntity1 e", Number.class).getSingleResult();
+        assertThat(res.intValue(), is(0));
+    }
+
+
+
+    public void canInterpretTransactionAttributeInParentClass() throws Exception {
+        TestEntity1 entity1 = new TestEntity1();
+        entity1.setIntAttribute(1);
+        statelessChildEJB.saveInCurrentTransactionDefaultTraAttribute(entity1);
+    }
+
+    public void canInterpretTransactionAttributeInParentMethodRequired() throws Exception {
+        userTransaction.begin();
+        TestEntity1 entity1 = new TestEntity1();
+        entity1.setIntAttribute(1);
+        statelessChildEJB.saveInCurrentTransactionRequiredTraAttribute(entity1);
+        userTransaction.commit();
+    }
+
+    public void canInterpretTransactionAttributeInParentMethodNever() throws Exception {
+        userTransaction.begin();
+        TestEntity1 entity1 = new TestEntity1();
+        entity1.setIntAttribute(1);
+        statelessChildEJB.saveInCurrentTransactionNeverTraAttribute(entity1);
+        userTransaction.commit();
+    }
+
 
 }

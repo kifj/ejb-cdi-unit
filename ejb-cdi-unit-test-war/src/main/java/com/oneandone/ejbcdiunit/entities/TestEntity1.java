@@ -1,20 +1,26 @@
 package com.oneandone.ejbcdiunit.entities;
 
+import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
+import javax.persistence.GenerationType;
 import javax.persistence.Id;
+import javax.persistence.Table;
 
 /**
  * @author aschoerk
  */
 @Entity
+@Table(name = "test_entity_1")
 public class TestEntity1 {
     @Id
-    @GeneratedValue
+    @GeneratedValue(strategy = GenerationType.TABLE)
     private Long id;
 
+    @Column(name = "string_attribute")
     private String stringAttribute;
 
+    @Column(name = "int_attribute")
     private int intAttribute;
 
     public TestEntity1() {

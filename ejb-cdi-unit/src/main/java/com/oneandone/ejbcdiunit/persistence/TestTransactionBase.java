@@ -1,13 +1,14 @@
 package com.oneandone.ejbcdiunit.persistence;
 
+import static javax.ejb.TransactionAttributeType.NOT_SUPPORTED;
+
+import java.util.concurrent.atomic.AtomicInteger;
+
 import javax.ejb.TransactionAttributeType;
 import javax.persistence.EntityTransaction;
 import javax.persistence.TransactionRequiredException;
-import javax.transaction.HeuristicMixedException;
-import javax.transaction.HeuristicRollbackException;
-import javax.transaction.RollbackException;
-import javax.transaction.Status;
-import javax.transaction.SystemException;
+
+import org.slf4j.MDC;
 
 /**
  * TestTransaction keeps the information about simulated EJB-Transactions for one EntityManager.
@@ -15,9 +16,14 @@ import javax.transaction.SystemException;
  */
 public class TestTransactionBase {
     private final PersistenceFactory persistenceFactory;
+    private final TransactionAttributeType transactionAttribute;
     private boolean dropEntityManager = false;
     private boolean closeIt = false;
     private boolean isClosed = false;
+
+    static AtomicInteger tracounter = new AtomicInteger(0);
+
+    private Integer lastXid = null;
 
     private TestTransactionBase embedding;
 
@@ -33,13 +39,18 @@ public class TestTransactionBase {
                                TransactionAttributeType transactionAttribute,
                                TestTransactionBase embedding) {
 
-        this.embedding = embedding;
-        TransactionAttributeType transactionAttributeType = transactionAttribute;
         this.persistenceFactory = persistenceFactory;
-        EntityTransaction tra = embedding == null ? null : persistenceFactory.get().getTransaction();
+        this.transactionAttribute = transactionAttribute;
+        this.embedding = embedding;
+        EntityTransaction tra = embedding == null ? null : persistenceFactory.getEntityManager().getTransaction();
+        if (embedding != null) {
+            if (embedding.transactionAttribute == NOT_SUPPORTED) {
+                embedding.getPersistenceFactory().getEntityManager().clear();
+            }
+        }
         switch (transactionAttribute) {
             case SUPPORTS:
-                if (embedding == null || !tra.isActive()) {
+                if (embedding == null) {
                     persistenceFactory.createAndRegister();
                     dropEntityManager = true;
                 }
@@ -51,6 +62,9 @@ public class TestTransactionBase {
             case NEVER:
                 if (tra.isActive()) {
                     throw new TransactionRequiredException("Transaction is not allowed");
+                } else {
+                    persistenceFactory.createAndRegister();
+                    dropEntityManager = true;
                 }
                 break;
             case MANDATORY:
@@ -59,21 +73,58 @@ public class TestTransactionBase {
                 }
                 break;
             case REQUIRED:
-                if (embedding == null || !tra.isActive()) {
-                    tra = persistenceFactory.get().getTransaction();
+                if (embedding == null || !embedding.traActive()) {
+                    persistenceFactory.createAndRegister();
+                    tra = persistenceFactory.getEntityManager().getTransaction();
+                    dropEntityManager = true;
                     closeIt = true;
                     tra.begin();
+                    newXid();
                 }
                 break;
             case REQUIRES_NEW:
                 persistenceFactory.createAndRegister();
-                persistenceFactory.get().getTransaction().begin();
+                persistenceFactory.getEntityManager().getTransaction().begin();
+                newXid();
                 closeIt = true;
                 dropEntityManager = true;
                 break;
             default:
                 throw new RuntimeException("Invalid TransactionAttribute " + transactionAttribute);
         }
+    }
+
+    private boolean traActive() {
+        switch (transactionAttribute) {
+            case NOT_SUPPORTED: return false;
+            case REQUIRED:
+            case REQUIRES_NEW: return true;
+            case SUPPORTS: {
+                if (embedding == null)
+                    return false;
+                else
+                    return embedding.traActive();
+            }
+            case NEVER: return false;
+            case MANDATORY: return true;
+            default:
+                throw new RuntimeException("unexpected transaction attribute: " + transactionAttribute);
+        }
+    }
+
+    private void newXid() {
+        assert lastXid == null;
+        if (MDC.get("XID") != null)
+            lastXid = Integer.parseInt(MDC.get("XID"));
+        MDC.put("XID", Integer.toString(tracounter.incrementAndGet()));
+    }
+
+    private void resetXid() {
+        if (lastXid != null)
+            MDC.put("XID", Integer.toString(lastXid));
+        else
+            MDC.remove("XID");
+        lastXid = null;
     }
 
     /**
@@ -98,7 +149,7 @@ public class TestTransactionBase {
         if (!isClosed) {
             try {
                 if (closeIt) {
-                    EntityTransaction tra = persistenceFactory.get().getTransaction();
+                    EntityTransaction tra = persistenceFactory.getEntityManager().getTransaction();
                     if (tra.isActive()) {
                         if (rollbackOnly || tra.getRollbackOnly()) {
                             tra.rollback();
@@ -106,6 +157,7 @@ public class TestTransactionBase {
                             tra.commit();
                         }
                     }
+                    resetXid();
                 }
             } finally {
                 if (dropEntityManager) {
@@ -117,39 +169,16 @@ public class TestTransactionBase {
         }
     }
 
-    public void setRollbackOnly() {
-        EntityTransaction tra = persistenceFactory.get().getTransaction();
-        if (tra.isActive()) {
-            tra.setRollbackOnly();
-        }
-    }
-
-    public int getStatus() throws SystemException {
-        EntityTransaction transaction = persistenceFactory.get().getTransaction();
-        int result = Status.STATUS_NO_TRANSACTION;
-        if (transaction.isActive()) {
-            if (transaction.getRollbackOnly()) {
-                result = Status.STATUS_MARKED_ROLLBACK;
-            } else {
-                result = Status.STATUS_ACTIVE;
-            }
-        }
-        return result;
-    }
-
-    public void setTransactionTimeout(int i) throws SystemException {
-
-    }
-
     public PersistenceFactory getPersistenceFactory() {
         return persistenceFactory;
     }
 
-    public void rollback() {
-        EntityTransaction tra = persistenceFactory.get().getTransaction();
+    void rollback() {
+        EntityTransaction tra = persistenceFactory.getEntityManager().getTransaction();
         try {
             if (tra.isActive()) {
                 tra.rollback();
+                resetXid();
             }
         } finally {
             if (!dropEntityManager && embedding != null) {
@@ -158,23 +187,4 @@ public class TestTransactionBase {
         }
     }
 
-    public void begin() {
-        EntityTransaction tra = persistenceFactory.get().getTransaction();
-        tra.begin();
-    }
-
-    public void commit() throws RollbackException, HeuristicMixedException, HeuristicRollbackException, SecurityException, IllegalStateException, SystemException {
-        EntityTransaction tra = persistenceFactory.get().getTransaction();
-        try {
-            if (tra.isActive()) {
-                tra.commit();
-            }
-        } finally {
-            if (dropEntityManager) {
-                persistenceFactory.unRegister();
-                dropEntityManager = false;
-            }
-        }
-
-    }
 }

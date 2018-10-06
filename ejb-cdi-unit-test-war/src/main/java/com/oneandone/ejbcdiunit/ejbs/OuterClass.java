@@ -1,9 +1,9 @@
 package com.oneandone.ejbcdiunit.ejbs;
 
+import javax.ejb.EJB;
 import javax.ejb.Stateless;
 import javax.ejb.TransactionAttribute;
 import javax.ejb.TransactionAttributeType;
-import javax.inject.Inject;
 
 import com.oneandone.ejbcdiunit.entities.TestEntity1;
 
@@ -13,8 +13,11 @@ import com.oneandone.ejbcdiunit.entities.TestEntity1;
 @Stateless
 public class OuterClass {
 
-    @Inject
+    @EJB
     StatelessEJB statelessEJB;
+
+    @EJB
+    SingletonEJB singletonEJB;
 
     public void saveNewInRequired(TestEntity1 testEntity1) {
         statelessEJB.saveInNewTransaction(testEntity1);
@@ -81,5 +84,31 @@ public class OuterClass {
         statelessEJB.saveRequiresNewLocalAsBusinessObject(testEntity1);
         throw new RuntimeException("exception to rollback transaction");
     }
+
+
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void saveRequiresNewLocalUsingSelf(TestEntity1 testEntity1) {
+        singletonEJB.saveRequiresNewLocalUsingSelf(testEntity1);
+    }
+
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void saveRequiresNewLocalUsingSelfAndThrow(TestEntity1 testEntity1) {
+        // no transaction-interceptor because of local call so both saves will be rolledback
+        singletonEJB.saveRequiresNewLocalUsingSelf(testEntity1);
+        throw new RuntimeException("exception to rollback transaction");
+    }
+
+    @TransactionAttribute(TransactionAttributeType.REQUIRES_NEW)
+    public void saveToSetRollbackOnlyAndTryAdditionalSave(TestEntity1 testEntity1) {
+        // no transaction-interceptor because of local call so both saves will be rolledback
+        try {
+            statelessEJB.persistRequiredAndRTException(testEntity1);
+        } catch (RuntimeException ex) {
+            ;
+        }
+        statelessEJB.saveInCurrentTransaction(new TestEntity1());
+        statelessEJB.saveInCurrentTransaction(new TestEntity1());
+    }
+
 
 }
