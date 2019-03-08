@@ -1,5 +1,154 @@
-ejb-cdi-unit
-============
+ioc-unit (formerly ejb-cdi-unit)
+================================
+![Build Status](https://travis-ci.org/1and1/ioc-unit.svg?branch=master)
+
+# What should this project achieve
+
+Support the development of tests inside non-trivial CDI/EJB-service-modules containing several hundred classes, entities, transactions, queues without starting the destination environment.
+
+Current environments either are full fledged integration tests which create the deployment structures and deploy those inside arquillian together with some testclasses. The problem here often is, that the server start is complicated to configure inside a developmentenvironment and the tests sometimes are not easily developed in a deterministic manor(because of multithreading, timers, asynchronous,...).
+
+The other possibility is to take a few classes to be tested out of the service and mock everything else using frameworks like mockito. The problem here can be, that the tests know very much about the internal structure of the services which makes refactoring often not so easy as agile development demands it.
+
+Then there is a way in between, which starts parts of the service inside a lightweight CDI-Environment (weld-se), mocks serviceinterfaces which are consumed and simulates responses or callbacks from outside. In this category weld-junit, cdi-unit, ejb-cdi-unit can be found. This works quite well with simple services, but makes the creation of automatic tests which possibly need hundreds of classes to run, quite difficult. 
+
+ioc-Unit also falls into that category but:
+
+* it helps to easily define the set of classes necessary to be included into the testconfiguration
+* it supports some extensions to the standalone environment which help to simulate databases, queues, asynchronous situations, requestcontexts. 
+
+
+# Currently 
+
+In this branch there is no ejb-cdi-unit anymore.
+The past showed that it is sometimes quite cumbersome to create a new test for an existing module. The causes for that 
+lie in the, most of the time helpful, intelligence of CDI-Unit in adding classes to the test-configuration.
+There is more about that in ....
+
+Therefore a module has been developed that 
+* discrimates between Test-Classes and "System under Test" Sut-Classes. This is done using new Annotations which are similar 
+in their function to the CDI-Unit-Annotations 
+* analyzes the injection points during adding of Classes to the system-configuration. 
+* finds according to so called available classes the best fitting candidate as producer for the injections.
+
+# Concepts
+
+
+
+## Defined, Available and Excluded classes
+
+**Defined classes** are: 
+* The Testclass
+* Classes added by Annotations @TestClasses, @SutClasses
+
+They will be added to the configuration to be started when weld starts in any event.
+
+**Available classes** are:
+* Classes added by Annotations @TestPackages, @SutPackages, @TestPackagesDeep, @SutPackagesDeep, @TestClasspaths, @SutClasspaths
+* Static inner classes found when adding Defined Classes to the set of available classes.
+
+They will be added to the configuration
+   * if an instance of themselves can be used as inject
+   * if they provide a producer that can be used as inject
+   * only if ambiguity heuristics decide their priority against other classes
+   
+**Excluded classes** are:
+* Classes added by the annotations @ExcludedClasses
+Every time a class is selected as candidate and @ExcludedClasses has been encountered before, this candidate is not used for resolution. If @ExcludedClasses gets encountered for a class already selected it has no effect for that class.
+
+## Candidates
+
+**Available Candidates** are:
+* no defined class
+* previously available classes
+* the classes themselves or a producer contained matches an inject
+* has been chosen amongst probably multiple candidates to match the inject. The competing classes are 
+rejected candidates.
+* might be a testclass and as such might be annotated by configuring annotations.
+
+**Rejected Candidates** are:
+* no defined classes
+* currently availabe classes but might lead to ambiguity concerning one certain inject
+* the classes themselves or a producer contained matches an inject
+
+
+## Test-Sut
+
+**Testclasses** are
+* The Testclass itself
+* All classes added using @TestClasses, @TestPackages, @TestPackagesDeep, @TestClasspaths
+* Static inner classes of Testclasses, if these are not denoted otherwise as Sutclasses
+* Can hold Configuring Annotations 
+
+**Sutclasses** are
+* All classes added using @SutClasses, @SutPackages, @SutPackagesDeep, @SutClasspaths
+* May not hold Configuring Annotations. If a Sutclass does, a Warning is produced.
+
+In case of ambiguities, Testclasses and Producers in Testclasses get priority over Sutclasses and their producers.
+
+## Alternatives
+
+If something is defined as Alternative according to the CDI-Spec and enabled according CDI-Spec. They get priority over 
+other productions usable for injects. Alternative-Stereotypes must be added to the configuration
+using @SutClasses or @TestClasses. @ProducesAlternative is defined by default. Alternative-Classes can be added using 
+@EnabledAlternatives.
+
+## Configuring Annotations
+By using Annotations at the Testclass itself or other classes denoted as Testclasses the configuration information
+provided to Weld-Se is defined.
+These Annotations are _@TestClasses, @SutClasses, @TestPackages, @SutPackages, @TestPackagesDeep, @SutPackagesDeep, 
+@TestClasspaths, @SutClasspaths, 
+@EnablesAlternatives, @ExcludedClasses_ 
+Since the building process works in several levels during which "available" classes might be added which themselves 
+might be annotated by configuring annotations, annotations encountered in a later level might contradict decisions made 
+earlier. 
+* An enabled Alternative might have already been excluded as candidate for an inject
+* An inner class denoted as testclass or sutclass because of the containing class, might be changed at a later level by
+a configuring annotation. This will lead to an error if this class already has been used to satisfy an inject in an 
+earlier level.                       
+                 
+
+
+
+## ConfigCreator
+The algorithm trying to create a configuration for the standalone engine works in several levels
+
+Initially: the testclass, all defined classes and some initial classes defined by the -tester-jars are input to the 
+first level.
+
+Each level the builder handles contains 4 phases:
+* **Analyzing and Collecting** Phase: Input classes are analyzed collections of injects and producers are built up.   
+   * configuring annotations of testclasses are interpreted. new defined classes are added to the level and 
+analyzed during this level as well.  
+   * the classes are searched for producers
+   * the classes are searched for injects (fields, constructors and injects)
+   * the classes are searched for static inner classes. these are added as "available" classes.
+* **Matching** Phase Found injects
+   * all encountered injects will be matched with producers and defined classes
+   * if an inject matches, it is denoted as handled
+   * if there are more than one matches for one inject and one of it originates from a Testclass.
+      * exclude the Sut-Classes comprising the other match. 
+      * Write warning. 
+      * This might lead to dangling other injects! It is an easy decision if the inject is the only match, otherwise search for
+        injects.
+* **Fixing** Phase builds probably up new input for the next level  
+   * injects not yet matched are tried to be matched using available testclasses and their contained producers
+   * injects not yet matched are tried to be matched using available sutclasses and their contained producers
+   * classes found during the extensionphase are new input to the next level. If more than one classes is found 
+   then the priority is:
+      * enabled Alternatives
+      * testclasses
+      * sutclasses   
+* **Guessing** if there are injects to matched, but the Fixing-Phase has not produced any new candidates this phase is started.
+It works similar to cdi-unit.
+All injects not yet matched are handled if they
+   * are allowed to be beans according to CDI-Spec: They are added as candidates for the next analyzing and collecting phase
+   * cannot be beans because they are abstract or interfaces: This leads to adding the class as if @SutClasspath or @TestClasspath 
+        was found. 
+The decision if the guessed classes are Sut or Test is made by looking at their classpath. If the classpath is already 
+found as testclasspath, the added candidates are handled as tests, otherwise as sut.
+
+
 Make test driven development of ejb-3.x services and processes easy.
 Supports:
 
@@ -11,7 +160,7 @@ Supports:
 * Processengine: Camunda 7.x
 
 
-![Build Status](https://travis-ci.org/1and1/ejb-cdi-unit.svg?branch=master)
+
 
 
 
@@ -44,7 +193,7 @@ Supports:
 
 # First Example
 
-[sourcecode](https://github.com/1and1/ejb-cdi-unit/blob/master/examples/ex2-syncconsumed)
+[sourcecode](https://github.com/1and1/ioc-unit/blob/master/examples/ex2-syncconsumed)
 
 
 **Example Service to be tested**
@@ -121,8 +270,8 @@ The usage does not differ very much from cdi-unit:
 
         <dependency>
             <groupId>net.oneandone</groupId>
-            <artifactId>ejb-cdi-unit</artifactId>
-            <version>${ejb-cdi-unit.version}</version>
+            <artifactId>ioc-unit</artifactId>
+            <version>${ioc-unit.version}</version>
             <scope>test</scope>
         </dependency>
 
@@ -136,9 +285,9 @@ The usage does not differ very much from cdi-unit:
 
 * ejb-cdi-unit is the module providing the test extensions, it is available from maven central
 * ejb-cdi-unit5 is the module providing the test extensions for JUnit5, it is available from maven central
-* ejb-cdi-unit-test-war is code used by
-	* ejb-cdi-unit-tests in regression tests
-	* ejb-cdi-unit-tests5 regression tests using JUnit5
+* ioc-unit-test-war is code used by
+	* ioc-unit-tests in regression tests
+	* ioc-unit-tests5 regression tests using JUnit5
 	* ejb-cdi-unit-tomee to show how the tests can be implemented using tomee embedded
 	* ejb-cdi-unit-arq to prove that the modules behaviour fits to wildfly
 * ejb-cdi-unit-tomee-simple contains some code doing simple tests only with tomee. ejb-cdi-unit is not used here.
@@ -188,7 +337,7 @@ by copying them from another Instance of the test-class which is created during 
 	<ejb-cdi-unit.version>1.1.16</ejb-cdi-unit.version>
         <weld-se.version>2.3.5.Final</weld-se.version>
         <junit5.version>5.3.0</junit5.version>
-        <surefire.version>2.22.0</surefire.version>
+        <surefire.version>${maven-surefire-plugin.version}</surefire.version>
         <junit-platform.version>1.3.0</junit-platform.version>
 </properties>
 ```
@@ -229,7 +378,7 @@ by copying them from another Instance of the test-class which is created during 
 ```
 
 * Annotate the JUnit5-Testclass with @ExtendWith(JUnit5Extension)
-Examples: see: [tests](https://github.com/1and1/ejb-cdi-unit/tree/master/ejb-cdi-unit-tests5) and [ex1-1entity5](https://github.com/1and1/ejb-cdi-unit/tree/master/examples/ex1-1entity5)
+Examples: see: [tests](https://github.com/1and1/ioc-unit/tree/master/ioc-unit-tests5) and [ex1-1entity5](https://github.com/1and1/ioc-unit/tree/master/examples/ex1-1entity5)
 
 # Examples
 
@@ -239,26 +388,26 @@ Several examples which should demonstrate how different kinds of artifacts can b
 This example contains a Service implemented as stateless EJB which can return a constant number and offers the possibility to
 add an Entity to a database and to search for it by its id.
 
-[see](https://github.com/1and1/ejb-cdi-unit/tree/master/examples/ex1-1entity)
+[see](https://github.com/1and1/ioc-unit/tree/master/examples/ex1-1entity)
 
 
 ## One Service and One Synchronously Consumed Service
 
-This simple kind of service just provides a service-interface does some calculations and  synchronously consumes some interfaces from other services it uses. A suggestion how such a service can be tested using ejb-cdi-unit will be shown
+This simple kind of service just provides a service-interface does some calculations and  synchronously consumes some interfaces from other services it uses. A suggestion how such a service can be tested using ioc-unit will be shown
 
- [see](https://github.com/1and1/ejb-cdi-unit/blob/master/examples/ex2-syncconsumed)
+ [see](https://github.com/1and1/ioc-unit/blob/master/examples/ex2-syncconsumed)
 
 
 ## One Service and One Asynchronously Consumed Service
 The handling of @Asynchronous is demonstrated in the following examples.
 
-[see](https://github.com/1and1/ejb-cdi-unit/tree/master/examples/ex3-asyncconsumedpoll)
+[see](https://github.com/1and1/ioc-unit/tree/master/examples/ex3-asyncconsumedpoll)
 
 ## One Service and One Asynchronously Consumed Service Plus Asynchronous Callback
 
 The previous example gets extended in a way so that the original service consumes a special interface its client provides and calls back as soon as the answer is ready.
 
-[see](https://github.com/1and1/ejb-cdi-unit/tree/master/examples/ex4-asyncconsumedpush)
+[see](https://github.com/1and1/ioc-unit/tree/master/examples/ex4-asyncconsumedpush)
 
 
 ## One Service and One Asynchronously Consumed Service internally using Messaging
@@ -268,22 +417,22 @@ In this way it can be made sure that requests are not lost even if a process or 
 
 Using two separate queues:
 
-[see](https://github.com/1and1/ejb-cdi-unit/tree/master/examples/ex5-asyncconsumedjms1)
+[see](https://github.com/1and1/ioc-unit/tree/master/examples/ex5-asyncconsumedjms1)
 
 Using one queue, mdbs are triggered by a defined messageSelector.
 
-[see](https://github.com/1and1/ejb-cdi-unit/tree/master/examples/ex6-asyncconsumedjms2)
+[see](https://github.com/1and1/ioc-unit/tree/master/examples/ex6-asyncconsumedjms2)
 
 ## Test of a Rest-Service
 
 This example shows how it is easily possible to test a artifact by it's rest-interface and being able to use the database at the same time.
 
-[see](https://github.com/1and1/ejb-cdi-unit/tree/master/examples/ex7-simplerest)
+[see](https://github.com/1and1/ioc-unit/tree/master/examples/ex7-simplerest)
 
 ## Test of a camunda BPM processing
 
-To support testing of processes ejb-cdi-unit contains CdiProcessEngineTestCase. Tests derived from that class can start processes, use/change Variables ... .
-The test of camunda-bpm-platform/engine-cdi are ported to [ejb-cdi-unit-camunda](https://github.com/1and1/ejb-cdi-unit/tree/master/ejb-cdi-unit-camunda/src/test/java/org/camunda/bpm/engine/cdi/cdiunittest).
+To support testing of processes ioc-unit contains CdiProcessEngineTestCase. Tests derived from that class can start processes, use/change Variables ... .
+The test of camunda-bpm-platform/engine-cdi are ported to [ioc-unit-camunda](https://github.com/1and1/ioc-unit/tree/master/ioc-unit-camunda/src/test/java/org/camunda/bpm/engine/cdi/cdiunittest).
 
 # Restrictions
 The helpers have been developed as required, therefore it was not necessarily a  goal to fully adhere to the J2EE-standard:
@@ -312,7 +461,7 @@ The helpers have been developed as required, therefore it was not necessarily a 
 
 # License
 
-Copyright 2017 1&amp;1 Internet AG, https://github.com/1and1/ejb-cdi-unit
+Copyright 2017 1&amp;1 Internet AG, https://github.com/1and1/ioc-unit
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
