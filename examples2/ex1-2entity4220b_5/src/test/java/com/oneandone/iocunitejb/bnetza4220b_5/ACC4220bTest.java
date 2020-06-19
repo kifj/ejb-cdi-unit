@@ -24,7 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import com.oneandone.iocunit.IocJUnit5Extension;
 import com.oneandone.iocunit.analyzer.annotations.SutClasses;
 import com.oneandone.iocunit.ejb.persistence.PersistenceFactory;
-import com.oneandone.iocunit.ejb.persistence.TestPersistenceFactory;
+import com.oneandone.iocunit.jpa.XmlLessPersistenceFactory;
 import com.oneandone.iocunitejb.bnetza4220b_5.SVersionsEntity.SVersionsEntityBuilder;
 
 
@@ -33,7 +33,7 @@ import com.oneandone.iocunitejb.bnetza4220b_5.SVersionsEntity.SVersionsEntityBui
  */
 @ExtendWith(IocJUnit5Extension.class)
 @TestInstance(TestInstance.Lifecycle.PER_METHOD)
-@SutClasses({TestPersistenceFactory.class})
+@SutClasses({XmlLessPersistenceFactory.class})
 public class ACC4220bTest {
 
     public static final String ACTIVE = "ACTIVE";
